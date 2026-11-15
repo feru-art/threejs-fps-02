@@ -1,8 +1,12 @@
-// Player movement: acceleration, friction, gravity, crouch, quiet walk and jump,
-// resolved as a box against the world's colliders one axis at a time, so a wall
-// never swallows the player. Stopping to aim pays: spread (see weapons.js) grows
-// with ground speed, and crouching halves it.
+// Player movement: acceleration, friction, gravity, crouch, quiet walk and
+// jump, resolved as a box against the world's colliders one axis at a time,
+// so a wall never swallows the player. The walkway floor comes from
+// world.groundHeight: walking up a ramp lifts the player, walking off the
+// deck drops them. Stopping to aim pays: spread (see weapons.js) grows with
+// ground speed, crouching halves it, and aiming down sights slows the walk
+// to a careful pace.
 import * as THREE from 'three';
+import { groundHeight } from './world.js';
 
 const RADIUS = 0.34;
 const STAND_HEIGHT = 1.72;
@@ -12,6 +16,7 @@ const CROUCH_EYE = 1.02;
 const WALK_SPEED = 5.2;
 const QUIET_SPEED = 2.6;
 const CROUCH_SPEED = 2.4;
+const ADS_SPEED = 2.8;
 const GROUND_ACCEL = 42;
 const AIR_ACCEL = 9;
 const FRICTION = 9;
@@ -28,15 +33,17 @@ export function createPlayer(colliders) {
     onGround: true,
     crouching: false,
     quiet: false,
+    aiming: false,
     height: STAND_HEIGHT,
     health: 100,
+    armour: 0,
     alive: true,
   };
   const probe = new THREE.Box3();
   const wish = new THREE.Vector3();
 
-  // lift keeps the feet and the crown out of the horizontal tests, so standing on
-  // the floor is not read as walking into a wall.
+  // lift keeps the feet and the crown out of the horizontal tests, so standing
+  // on the floor — or on the walkway deck — is not read as walking into a wall.
   function overlaps(x, y, z, height, lift) {
     probe.min.set(x - RADIUS, y + lift, z - RADIUS);
     probe.max.set(x + RADIUS, y + height - lift, z + RADIUS);
@@ -45,8 +52,9 @@ export function createPlayer(colliders) {
   }
 
   function look(dx, dy, sensitivity = 0.0022) {
-    player.yaw -= dx * sensitivity;
-    player.pitch = Math.max(-1.45, Math.min(1.45, player.pitch - dy * sensitivity));
+    const sense = player.aiming ? sensitivity * 0.6 : sensitivity;
+    player.yaw -= dx * sense;
+    player.pitch = Math.max(-1.45, Math.min(1.45, player.pitch - dy * sense));
   }
 
   function recoil(pitchKick, yawKick) {
@@ -76,7 +84,7 @@ export function createPlayer(colliders) {
       wish.set(-sin * forward + cos * strafe, 0, -cos * forward - sin * strafe).normalize();
     }
 
-    const speed = player.crouching ? CROUCH_SPEED : player.quiet ? QUIET_SPEED : WALK_SPEED;
+    const speed = player.aiming ? ADS_SPEED : player.crouching ? CROUCH_SPEED : player.quiet ? QUIET_SPEED : WALK_SPEED;
     const blend = Math.min(1, ((player.onGround ? GROUND_ACCEL : AIR_ACCEL) * dt) / speed);
     player.velocity.x += (wish.x * speed - player.velocity.x) * blend;
     player.velocity.z += (wish.z * speed - player.velocity.z) * blend;
@@ -110,6 +118,13 @@ export function createPlayer(colliders) {
       player.position.y = hit.min.y - player.height;
       player.velocity.y = 0;
     }
+    // The walkway floor: a ramp lifts a walking player, a deck edge drops one.
+    const floorY = groundHeight(player.position.x, player.position.z);
+    if (player.position.y <= floorY) {
+      player.position.y = floorY;
+      player.velocity.y = 0;
+      player.onGround = true;
+    }
     if (player.position.y < 0) {
       player.position.y = 0;
       player.velocity.y = 0;
@@ -132,8 +147,10 @@ export function createPlayer(colliders) {
       player.yaw = yaw;
       player.pitch = 0;
       player.health = 100;
+      player.armour = 0;
       player.alive = true;
       player.crouching = false;
+      player.aiming = false;
       player.height = STAND_HEIGHT;
       player.eye = STAND_EYE;
     },

@@ -4,7 +4,7 @@
 // hear (gunfire carries 25 m, running steps 8 m, quiet walking nothing).
 // If the AudioContext is suspended (no gesture yet, or shot mode), the markers
 // still land and the sounds are skipped.
-const HEARING_RANGE = { shot: 25, step: 8, explosion: 60, plant: 12, reload: 6 };
+const HEARING_RANGE = { shot: 25, step: 8, explosion: 60, plant: 12, reload: 6, smoke: 10 };
 
 export function createAudio() {
   let ctx = null;
@@ -105,6 +105,10 @@ export function createAudio() {
       hear('plant', x, z, time);
       tone(700, 0.1, 0.2, 'square');
       tone(1050, 0.12, 0.2, 'square', 0.12);
+    },
+    smoke(x, z, time) {
+      hear('smoke', x, z, time);
+      noiseBurst(0.5, 900, 0.25);
     },
     explosion(x, z, time) {
       hear('explosion', x, z, time);

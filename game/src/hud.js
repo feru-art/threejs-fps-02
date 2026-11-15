@@ -1,15 +1,16 @@
-// The DOM HUD: crosshair with a spread gap, hit marker, health, ammo, money,
-// timer, score, kill feed, prompts, the buy menu and the overlays. It never
-// touches the simulation; main.js pushes numbers in and reads callbacks out.
-// Every setter skips work when the value did not change.
+// The DOM HUD: crosshair with a spread gap, hit marker, health, armour,
+// ammo, money, timer, score, kill feed, radio callouts, prompts, the buy
+// menu and the overlays. It never touches the simulation; main.js pushes
+// numbers in and reads callbacks out. Every setter skips work when the value
+// did not change.
 const COPY = {
   start: {
-    title: 'CINDER<span>LINE</span>',
-    copy: 'A 5v5 tactical shooter in a rail yard at dusk. You attack with four bots against five defenders: plant the bomb at site A or B, or eliminate the other team. Earn money each round and spend it in the buy menu. Stop to aim — firing on the move punishes you.',
+    title: 'NORTHLIGHT <span>RELAY</span>',
+    copy: 'A 5v5 tactical shooter at an Arctic relay station under the aurora. You attack with four bots against five defenders: plant the bomb at site A or B, or eliminate the other team. Earn money each round and spend it in the buy menu — rifles, armour, frag and smoke grenades. Stop to aim — firing on the move punishes you, and right mouse aims down sights.',
     action: 'Click to play',
   },
   paused: {
-    title: 'CINDER<span>LINE</span>',
+    title: 'NORTHLIGHT <span>RELAY</span>',
     copy: 'Paused. Click to resume.',
     action: 'Click to resume',
   },
@@ -32,6 +33,9 @@ export function createHud() {
   const scoreDef = $('score-def');
   const healthValue = $('health-value');
   const healthFill = $('health-fill');
+  const armourRow = $('armour-row');
+  const armourValue = $('armour-value');
+  const armourFill = $('armour-fill');
   const ammoMag = $('ammo-mag');
   const ammoReserve = $('ammo-reserve');
   const ammoBox = $('ammo');
@@ -39,6 +43,7 @@ export function createHud() {
   const money = $('money');
   const grenades = $('grenades');
   const killfeed = $('killfeed');
+  const radioFeed = $('radio');
   const prompt = $('prompt');
   const bombstatus = $('bombstatus');
   const banner = $('banner');
@@ -83,6 +88,16 @@ export function createHud() {
       }
       healthFill.classList.toggle('low', value <= 30);
     },
+    setArmour(value) {
+      const v = Math.max(0, Math.ceil(value));
+      setText(armourValue, 'arm', String(v));
+      armourRow.hidden = v <= 0;
+      const pct = `${Math.max(0, Math.min(100, value))}%`;
+      if (last.armbar !== pct) {
+        last.armbar = pct;
+        armourFill.style.width = pct;
+      }
+    },
     setAmmo(mag, reserve, weapon) {
       setText(ammoMag, 'mag', String(mag));
       setText(ammoReserve, 'res', `/ ${reserve}`);
@@ -93,21 +108,23 @@ export function createHud() {
       setText(money, 'money', `$${value}`);
       setText(buyCash, 'buycash', `$${value}`);
       for (const item of buyItems) {
-        // The price is the item's last element (<b>$2700</b>); the damage
-        // note inside the label is also a <b>, so b:last-child would lie.
         const price = Number(item.lastElementChild.textContent.replace(/[^0-9]/g, ''));
         item.classList.toggle('cant', value < price);
       }
     },
-    setGrenades(count) {
-      setText(grenades, 'grenades', count > 0 ? `◉ ${count} grenade${count > 1 ? 's' : ''} [G]` : '');
+    setGrenades(frag, smoke) {
+      const parts = [];
+      if (frag > 0) parts.push(`◉ ${frag} frag [G]`);
+      if (smoke > 0) parts.push(`◎ ${smoke} smoke [H]`);
+      setText(grenades, 'gren', parts.join('  '));
     },
-    setCrosshairGap(px) {
+    setCrosshairGap(px, aiming) {
       const v = `${Math.round(px)}px`;
       if (last.gap !== v) {
         last.gap = v;
         crosshair.style.setProperty('--gap', v);
       }
+      crosshair.classList.toggle('ads', !!aiming);
     },
     hitMarker(killed, holdMs = 90) {
       hitmarker.classList.add('on');
@@ -133,6 +150,16 @@ export function createHud() {
       setTimeout(() => {
         if (div.parentNode) div.parentNode.removeChild(div);
       }, 6000);
+    },
+    addRadio(name, team, text) {
+      const div = document.createElement('div');
+      const cls = team === 'atk' ? 'a' : 'd';
+      div.innerHTML = `<span class="${cls}">${name}</span> ▸ ${text}`;
+      radioFeed.appendChild(div);
+      while (radioFeed.children.length > 4) radioFeed.removeChild(radioFeed.firstChild);
+      setTimeout(() => {
+        if (div.parentNode) div.parentNode.removeChild(div);
+      }, 8000);
     },
     setPrompt(text) {
       if (!text) {

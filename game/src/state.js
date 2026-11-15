@@ -20,9 +20,12 @@ export function createState() {
     bomb: { status: 'carried', carrier: null, site: null, x: 0, z: 0, plantLeft: 0, defuseLeft: 0, explodeLeft: 0, plantDone: false, defuseDone: false },
     // Combatants, filled by main.js: the player plus nine bots.
     entities: [],
-    // Kill feed entries, newest last: { text, atkSide }.
-    feed: [],
+    // Radio callouts and minimap pings, newest last.
+    radio: [],
+    pings: [],
     kills: { player: 0, atk: 0, def: 0 },
+    // The round plan, announced at buy phase: { site, lanes }.
+    plan: null,
     muted: false,
     started: false,
     elapsed: 0,

@@ -1,15 +1,20 @@
-// Bots: nine of them, four beside the player and five against. Each bot has a
-// plan (a route to a site, or a hold), eyes (a vision cone plus a line-of-sight
-// ray, checked on a stagger so nine bots never raycast on the same step), ears
-// (the audio hearing bus) and a trigger finger (bursts with distance-scaled
-// error, strafing while engaged). They plant and defuse by holding still.
+// Bots: nine of them, four beside the player and five against. Each bot has
+// a plan (a route to a site, or a hold), eyes (a vision cone plus a
+// line-of-sight ray, checked on a stagger so nine bots never raycast on the
+// same step), ears (the audio hearing bus) and a trigger finger (bursts with
+// distance-scaled error, strafing while engaged). They plant and defuse by
+// holding still, call out what they see on the radio, and ping the minimap
+// when they spot an enemy. After the bomb is planted, attackers fall back
+// to crossfire holds around the site. Bots climb the walkway: their height
+// follows world.groundHeight, so a bot on the gantry fights from 2.6 m up.
 import * as THREE from 'three';
 import { PALETTE, TEAM_COLOR } from './palette.js';
 import { pick, range } from './rng.js';
+import { groundHeight } from './world.js';
 
 const BOT_NAMES = {
-  atk: ['ASH', 'BRICK', 'COAL', 'DUSK'],
-  def: ['EMBER', 'FROST', 'GALE', 'HAZE', 'IRON'],
+  atk: ['HALO', 'JUNO', 'KODIAK', 'LYRA'],
+  def: ['ORION', 'SABLE', 'TUNDRA', 'VEGA', 'WOLF'],
 };
 const WALK_SPEED = 4.2;
 const VISION_RANGE = 42;
@@ -18,17 +23,24 @@ const LOSE_TARGET_SECONDS = 3;
 const BURST_MIN = 3;
 const BURST_MAX = 5;
 
-export function createBots(scene, world, nav, combat, audio, state, random) {
+export function createBots(scene, world, nav, combat, audio, state, random, radio) {
   const torsoGeo = new THREE.BoxGeometry(0.5, 0.72, 0.28);
   const headGeo = new THREE.SphereGeometry(0.15, 12, 10);
+  const helmetGeo = new THREE.SphereGeometry(0.17, 12, 8, 0, Math.PI * 2, 0, Math.PI * 0.55);
   const legGeo = new THREE.BoxGeometry(0.18, 0.72, 0.2);
+  const armGeo = new THREE.BoxGeometry(0.12, 0.6, 0.14);
   const gunGeo = new THREE.BoxGeometry(0.07, 0.09, 0.55);
+  const packGeo = new THREE.BoxGeometry(0.36, 0.44, 0.16);
   const bandGeo = new THREE.BoxGeometry(0.52, 0.12, 0.3);
+  const visorGeo = new THREE.BoxGeometry(0.2, 0.06, 0.04);
   const materials = {
-    atk: new THREE.MeshStandardMaterial({ color: new THREE.Color('#3a2c1e'), roughness: 0.8 }),
-    def: new THREE.MeshStandardMaterial({ color: new THREE.Color('#1e2c3a'), roughness: 0.8 }),
+    atk: new THREE.MeshStandardMaterial({ color: new THREE.Color('#4a3423'), roughness: 0.85 }),
+    def: new THREE.MeshStandardMaterial({ color: new THREE.Color('#22333f'), roughness: 0.85 }),
     head: new THREE.MeshStandardMaterial({ color: new THREE.Color(PALETTE.muted), roughness: 0.7 }),
+    helmet: new THREE.MeshStandardMaterial({ color: new THREE.Color('#39424c'), roughness: 0.5, metalness: 0.4 }),
     gun: new THREE.MeshStandardMaterial({ color: new THREE.Color(PALETTE.hairline), roughness: 0.6, metalness: 0.3 }),
+    pack: new THREE.MeshStandardMaterial({ color: new THREE.Color('#2f3a2a'), roughness: 0.9 }),
+    visor: new THREE.MeshBasicMaterial({ color: new THREE.Color('#9fd8ff') }),
   };
   const bandMats = {
     atk: new THREE.MeshBasicMaterial({ color: new THREE.Color(TEAM_COLOR.atk) }),
@@ -50,15 +62,25 @@ export function createBots(scene, world, nav, combat, audio, state, random) {
     const head = new THREE.Mesh(headGeo, materials.head);
     head.position.y = 1.62;
     head.castShadow = true;
+    const helmet = new THREE.Mesh(helmetGeo, materials.helmet);
+    helmet.position.y = 1.66;
+    const visor = new THREE.Mesh(visorGeo, materials.visor);
+    visor.position.set(0, 1.62, -0.14);
     const legL = new THREE.Mesh(legGeo, materials[team]);
     legL.position.set(-0.13, 0.36, 0);
     const legR = new THREE.Mesh(legGeo, materials[team]);
     legR.position.set(0.13, 0.36, 0);
+    const armL = new THREE.Mesh(armGeo, materials[team]);
+    armL.position.set(-0.32, 1.1, -0.05);
+    const armR = new THREE.Mesh(armGeo, materials[team]);
+    armR.position.set(0.32, 1.1, -0.05);
     const gun = new THREE.Mesh(gunGeo, materials.gun);
     gun.position.set(0.18, 1.15, -0.3);
+    const pack = new THREE.Mesh(packGeo, materials.pack);
+    pack.position.set(0, 1.12, 0.22);
     const band = new THREE.Mesh(bandGeo, bandMats[team]);
     band.position.y = 1.32;
-    group.add(torso, head, legL, legR, gun, band);
+    group.add(torso, head, helmet, visor, legL, legR, armL, armR, gun, pack, band);
     scene.add(group);
     const bot = {
       id: `bot-${team}-${index}`,
@@ -66,6 +88,7 @@ export function createBots(scene, world, nav, combat, audio, state, random) {
       kind: 'bot',
       team,
       health: 100,
+      armour: 0,
       alive: true,
       position: new THREE.Vector3(),
       yaw: 0,
@@ -79,6 +102,8 @@ export function createBots(scene, world, nav, combat, audio, state, random) {
       head,
       legL,
       legR,
+      armL,
+      armR,
       route: [],
       routeIndex: 0,
       hold: null,
@@ -100,6 +125,8 @@ export function createBots(scene, world, nav, combat, audio, state, random) {
       lastX: 0,
       lastZ: 0,
       fall: 0,
+      calloutAt: -99,
+      pingAt: -99,
     };
     torso.userData.entity = bot;
     torso.userData.part = 'torso';
@@ -124,12 +151,13 @@ export function createBots(scene, world, nav, combat, audio, state, random) {
   }
 
   function placeBot(bot, x, z, yaw) {
-    bot.position.set(x, 0, z);
+    bot.position.set(x, groundHeight(x, z), z);
     bot.yaw = yaw;
     bot.group.position.copy(bot.position);
     bot.group.rotation.set(0, yaw, 0);
     bot.group.visible = true;
     bot.health = 100;
+    bot.armour = 0;
     bot.alive = true;
     bot.fall = 0;
     bot.target = null;
@@ -138,10 +166,12 @@ export function createBots(scene, world, nav, combat, audio, state, random) {
     bot.burstLeft = 0;
   }
 
+  // The round plan: attackers split across the lanes to the chosen site,
+  // one of them over the walkway; defenders hold. The plan is announced on
+  // the radio and in the banner, so the player can play with the team.
   function planRound(attackSite) {
-    // Attackers split across the lanes to the chosen site; defenders hold.
     const atkBots = list.filter((b) => b.team === 'atk');
-    const lanes = attackSite === 'A' ? ['mid', 'west', 'west', 'mid'] : ['mid', 'east', 'east', 'mid'];
+    const lanes = attackSite === 'A' ? ['mid', 'west', 'walk', 'mid'] : ['mid', 'east', 'walk', 'mid'];
     atkBots.forEach((bot, i) => {
       bot.targetSite = attackSite;
       bot.route = nav.planRoute(random, attackSite, lanes[i % lanes.length]);
@@ -158,6 +188,10 @@ export function createBots(scene, world, nav, combat, audio, state, random) {
       bot.routeIndex = 0;
       bot.mode = 'advance';
     });
+    const plan = { site: attackSite, lanes };
+    state.plan = plan;
+    if (radio) radio.plan(attackSite, lanes, state.elapsed);
+    return plan;
   }
 
   function canSee(bot, enemy) {
@@ -182,6 +216,12 @@ export function createBots(scene, world, nav, combat, audio, state, random) {
     bot.yaw += Math.max(-6 * dt, Math.min(6 * dt, diff));
   }
 
+  function settleHeight(bot, dt) {
+    const floorY = groundHeight(bot.position.x, bot.position.z);
+    if (floorY > bot.position.y) bot.position.y = floorY;
+    else if (floorY < bot.position.y) bot.position.y = Math.max(floorY, bot.position.y - 14 * dt);
+  }
+
   function moveToward(bot, point, dt, speed) {
     moveDir.set(point.x - bot.position.x, 0, point.z - bot.position.z);
     const dist = moveDir.length();
@@ -194,6 +234,8 @@ export function createBots(scene, world, nav, combat, audio, state, random) {
     bot.walkPhase += dt * 9;
     bot.legL.rotation.x = Math.sin(bot.walkPhase) * 0.6;
     bot.legR.rotation.x = -Math.sin(bot.walkPhase) * 0.6;
+    bot.armL.rotation.x = -Math.sin(bot.walkPhase) * 0.4;
+    bot.armR.rotation.x = Math.sin(bot.walkPhase) * 0.4;
     // Cheap push-out from world colliders (XZ circle vs AABB).
     for (const box of world.colliders) {
       if (box.min.y > 1.2) continue;
@@ -210,6 +252,7 @@ export function createBots(scene, world, nav, combat, audio, state, random) {
     }
     bot.position.x = Math.max(-31.5, Math.min(31.5, bot.position.x));
     bot.position.z = Math.max(-21.5, Math.min(21.5, bot.position.z));
+    settleHeight(bot, dt);
     return dist - stepLen < 0.05;
   }
 
@@ -294,11 +337,22 @@ export function createBots(scene, world, nav, combat, audio, state, random) {
           }
         }
         if (best) {
+          const hadTarget = !!bot.target;
           bot.target = best;
           bot.lastSeen = { x: best.position.x, z: best.position.z };
           bot.lastSeenAt = time;
           bot.mode = 'engage';
           bot.channel = null;
+          // Spotted: a radio callout and a minimap ping, throttled.
+          if (!hadTarget && radio && time - bot.calloutAt > 6) {
+            bot.calloutAt = time;
+            radio.spotted(bot, best, time);
+          }
+          if (time - bot.pingAt > 3) {
+            bot.pingAt = time;
+            state.pings.push({ x: best.position.x, z: best.position.z, time, team: best.team });
+            if (state.pings.length > 12) state.pings.shift();
+          }
         } else if (bot.target && time - bot.lastSeenAt > LOSE_TARGET_SECONDS) {
           bot.target = null;
           bot.mode = 'advance';
@@ -330,9 +384,21 @@ export function createBots(scene, world, nav, combat, audio, state, random) {
         continue;
       }
 
-      if (state.bomb.status === 'planted' && !bot.target && bot.team === 'def') {
-        // A planted bomb rewrites a defender's mission: rush the site to defuse.
-        moveToward(bot, state.bomb, dt, WALK_SPEED);
+      if (state.bomb.status === 'planted' && !bot.target) {
+        if (bot.team === 'def') {
+          // A planted bomb rewrites a defender's mission: rush the site to defuse.
+          moveToward(bot, state.bomb, dt, WALK_SPEED);
+        } else {
+          // Attackers hold crossfire corners around the site, not the open snow.
+          const atkBots = list.filter((b) => b.team === 'atk' && b.alive);
+          const hold = nav.postPlantHold(state.bomb.site, atkBots.indexOf(bot));
+          const d = Math.hypot(hold.x - bot.position.x, hold.z - bot.position.z);
+          if (d > 0.6) moveToward(bot, hold, dt, WALK_SPEED);
+          else {
+            const site = state.bomb.site === 'A' ? { x: -15, z: -7 } : { x: 15, z: -7 };
+            lookAt(bot, site.x, site.z, dt);
+          }
+        }
       } else if (bot.target && bot.target.alive) {
         // Engage: strafe sideways and shoot in bursts.
         if (time > bot.strafeUntil) {
@@ -354,6 +420,9 @@ export function createBots(scene, world, nav, combat, audio, state, random) {
           bot.walkPhase += dt * 9;
           bot.legL.rotation.x = Math.sin(bot.walkPhase) * 0.6;
           bot.legR.rotation.x = -Math.sin(bot.walkPhase) * 0.6;
+          bot.armL.rotation.x = -Math.sin(bot.walkPhase) * 0.4;
+          bot.armR.rotation.x = Math.sin(bot.walkPhase) * 0.4;
+          settleHeight(bot, dt);
         }
         lookAt(bot, bot.target.position.x, bot.target.position.z, dt);
         botShoot(bot, time, playerEntity);
@@ -400,6 +469,8 @@ export function createBots(scene, world, nav, combat, audio, state, random) {
       bot.group.rotation.set(0, 0, 0);
       bot.legL.rotation.x = 0;
       bot.legR.rotation.x = 0;
+      bot.armL.rotation.x = 0;
+      bot.armR.rotation.x = 0;
     }
   }
 

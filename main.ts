@@ -1,4 +1,4 @@
-// CINDERLINE — hand-in for make.fun threejs-fps-02 (Node 22, stdlib only).
+// NORTHLIGHT RELAY — hand-in for make.fun threejs-fps-02 (Node 22, stdlib only).
 // The game is the static game/ folder beside this file; the screenshots in
 // screenshots/ are the frames the judge looks at first (the first by name is
 // the cover). This program copies both into the output directory and writes

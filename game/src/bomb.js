@@ -68,8 +68,9 @@ export function createBomb(scene, state) {
       bomb.carrier = null;
       bomb.explodeLeft = FUSE_SECONDS;
       bomb.defuseLeft = 0;
-      bomb.x = x;
-      bomb.z = z;
+      bomb.plantLeft = 0;
+      bomb.plantDone = false;
+      bomb.defuseDone = false;
       beepAt = 0;
       placeAt(x, z);
     },

@@ -1,11 +1,11 @@
 // Keyboard and mouse, and the pointer lock that turns the mouse into look.
 // Plain browser APIs only. Besides the held-key set it tracks pressed edges —
-// keys that went down since the last step — so E, G, B, R and the buy digits
-// fire once per press instead of once per frame.
+// keys that went down since the last step — so E, G, H, B, R and the buy
+// digits fire once per press instead of once per frame. Right mouse is aim.
 export function createInput(canvas, onLockChange) {
   const keys = new Set();
   const pressed = new Set();
-  const state = { keys, pressed, locked: false, firing: false, mousePressed: false, lookX: 0, lookY: 0 };
+  const state = { keys, pressed, locked: false, firing: false, aiming: false, mousePressed: false, lookX: 0, lookY: 0 };
 
   function setKey(event, down) {
     if (down) {
@@ -21,6 +21,7 @@ export function createInput(canvas, onLockChange) {
     keys.clear();
     pressed.clear();
     state.firing = false;
+    state.aiming = false;
   });
   window.addEventListener('mousemove', (event) => {
     if (!state.locked) return;
@@ -28,22 +29,27 @@ export function createInput(canvas, onLockChange) {
     state.lookY += event.movementY;
   });
   window.addEventListener('mousedown', (event) => {
-    if (state.locked && event.button === 0) {
+    if (!state.locked) return;
+    if (event.button === 0) {
       state.firing = true;
       // A click edge, not a held state: a press shorter than one frame still
       // fires a semi-automatic weapon, even on a slow machine.
       state.mousePressed = true;
     }
+    if (event.button === 2) state.aiming = true;
   });
   window.addEventListener('mouseup', (event) => {
     if (event.button === 0) state.firing = false;
+    if (event.button === 2) state.aiming = false;
   });
+  window.addEventListener('contextmenu', (event) => event.preventDefault());
   document.addEventListener('pointerlockchange', () => {
     state.locked = document.pointerLockElement === canvas;
     if (!state.locked) {
       keys.clear();
       pressed.clear();
       state.firing = false;
+      state.aiming = false;
     }
     onLockChange(state.locked);
   });
